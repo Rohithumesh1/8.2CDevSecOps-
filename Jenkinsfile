@@ -26,7 +26,7 @@ pipeline {
                                  <p><b>Status:</b> ${currentBuild.currentResult}</p>
                                  <p><b>Job:</b> ${env.JOB_NAME} #${env.BUILD_NUMBER}</p>
                                  <p><b>Build URL:</b> ${env.BUILD_URL}</p>""",
-                        to: "YOUR_EMAIL_HERE",
+                        to: "rohithumi@gmail.com",
                         attachLog: true
                     )
                 }
