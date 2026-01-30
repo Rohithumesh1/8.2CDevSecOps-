@@ -8,7 +8,7 @@ pipeline {
 
   environment {
     SONAR_PROJECT_KEY = "project"
-    SONAR_HOST_URL    = "http://host.docker.internal:9000"
+    SONAR_HOST_URL = "http://localhost:9000"
   }
 
   stages {
