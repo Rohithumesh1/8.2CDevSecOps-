@@ -8,7 +8,7 @@ pipeline {
 
   environment {
     SONAR_PROJECT_KEY = "project"
-    SONAR_HOST_URL = "http://host.docker.internal:9000"
+    SONAR_HOST_URL    = "http://host.docker.internal:9000"
   }
 
   stages {
@@ -24,7 +24,7 @@ pipeline {
         sh '''
           node -v || true
           npm -v || true
-          npm install
+          npm ci || npm install
         '''
       }
     }
@@ -33,22 +33,33 @@ pipeline {
       steps {
         script {
           def scannerHome = tool 'SonarScanner'
+
           withSonarQubeEnv('sonar') {
-            sh """
-              ${scannerHome}/bin/sonar-scanner \
-                -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                -Dsonar.sources=. \
-                -Dsonar.host.url=${SONAR_HOST_URL} \
-                -Dsonar.login=$SONAR_AUTH_TOKEN \
-                -Dsonar.javascript.node.maxspace=4096 \
-                -Dsonar.exclusions=node_modules/**,coverage/**,dist/**,build/**,**/*.min.js,**/public/js/ga.js
-            """
+
+            // IMPORTANT:
+            // Jenkins → Manage Jenkins → Credentials
+            // Add Secret Text
+            // ID = sonar-token
+            // Value = your SonarQube generated token
+
+            withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+
+              sh """
+                ${scannerHome}/bin/sonar-scanner \
+                  -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                  -Dsonar.sources=. \
+                  -Dsonar.host.url=${SONAR_HOST_URL} \
+                  -Dsonar.login=$SONAR_TOKEN \
+                  -Dsonar.javascript.node.maxspace=4096 \
+                  -Dsonar.exclusions=node_modules/**,coverage/**,dist/**,build/**,**/*.min.js,**/public/js/ga.js
+              """
+            }
           }
         }
       }
       post {
-        unsuccessful {
-          echo "SonarQube failed, but continuing pipeline..."
+        failure {
+          echo "SonarQube failed but pipeline will continue..."
         }
       }
     }
@@ -56,8 +67,8 @@ pipeline {
     stage('Run Tests') {
       steps {
         sh '''
-          if npm run | grep -q " test"; then
-            echo "Running npm test..."
+          if npm run 2>/dev/null | grep -q " test"; then
+            echo "Running npm test (non-blocking)..."
             npm test || true
           else
             echo "No test script found. Skipping."
@@ -66,14 +77,28 @@ pipeline {
       }
     }
 
-    stage('Snyk Test (Security Scan)') {
+    stage('Snyk Security Scan') {
       steps {
         script {
-          withCredentials([string(credentialsId: 'snyk-token', variable: 'SNYK_TOKEN')]) {
-            sh '''
-              echo "Running Snyk test..."
-              npx snyk test || true
-            '''
+          try {
+
+            // OPTIONAL:
+            // Jenkins → Credentials
+            // Add Secret Text
+            // ID = snyk-token
+            // Value = your Snyk API token
+
+            withCredentials([string(credentialsId: 'snyk-token', variable: 'SNYK_TOKEN')]) {
+
+              sh '''
+                echo "Running Snyk scan (non-blocking)..."
+                npx snyk --version || true
+                npx snyk test || true
+              '''
+            }
+
+          } catch (err) {
+            echo "Snyk credentials not found. Skipping Snyk stage."
           }
         }
       }
@@ -82,19 +107,20 @@ pipeline {
     stage('Generate Coverage Report') {
       steps {
         sh '''
-          if npm run | grep -q " coverage"; then
+          if npm run 2>/dev/null | grep -q " coverage"; then
+            echo "Running coverage..."
             npm run coverage || true
           else
-            echo "Coverage not configured. Skipping."
+            echo "Coverage script not found. Skipping."
           fi
         '''
       }
     }
 
-    stage('NPM Audit (Security Scan)') {
+    stage('NPM Audit') {
       steps {
         sh '''
-          echo "Running npm audit..."
+          echo "Running npm audit (non-blocking)..."
           npm audit || true
         '''
       }
@@ -103,14 +129,13 @@ pipeline {
 
   post {
     always {
-      echo "Pipeline finished. Check Sonar + Jenkins dashboard."
+      echo "Pipeline finished. Check Jenkins console + SonarQube dashboard."
     }
 
     success {
       emailext(
-        subject: "Jenkins SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-        body: """Build SUCCESS
-
+        subject: "Jenkins Build SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+        body: """Build SUCCESS ✅
 Job: ${env.JOB_NAME}
 Build: #${env.BUILD_NUMBER}
 URL: ${env.BUILD_URL}
@@ -121,9 +146,8 @@ URL: ${env.BUILD_URL}
 
     failure {
       emailext(
-        subject: "Jenkins FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-        body: """Build FAILED
-
+        subject: "Jenkins Build FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+        body: """Build FAILED ❌
 Job: ${env.JOB_NAME}
 Build: #${env.BUILD_NUMBER}
 URL: ${env.BUILD_URL}
